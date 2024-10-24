@@ -1,4 +1,57 @@
-// main.java
+
+class CacheLine {
+    int tag;             // Tag for the cache line
+    boolean valid;       // Valid bit (true if the line is valid)
+    boolean dirty;       // Dirty bit (true if the line is modified)
+    int[] data;         // Data stored in the cache line
+
+    // Constructor
+    public CacheLine(int blockSize) {
+        this.tag = 0;
+        this.valid = false;   // Initially invalid
+        this.dirty = false;   // Initially not dirty
+        this.data = new int[blockSize / 4]; // 4 bytes per word (32 bits)
+    }
+}
+
+// CacheSet.java - Represents a set in the cache
+class CacheSet {
+    CacheLine[] lines;  // Array of cache lines
+
+    // Constructor
+    public CacheSet(int associativity, int blockSize) {
+        lines = new CacheLine[associativity];
+        for (int i = 0; i < associativity; i++) {
+            lines[i] = new CacheLine(blockSize); // Initialize each cache line
+        }
+    }
+}
+
+// Cache.java - Represents the cache itself
+class Cache {
+    CacheSet[] sets; // Array of sets in the cache
+
+    // Constructor
+    public Cache(int capacityKB, int blockSize, int associativity) {
+        int numSets = (capacityKB * 1024) / (blockSize * associativity); // Calculate number of sets
+        sets = new CacheSet[numSets];
+
+        for (int i = 0; i < numSets; i++) {
+            sets[i] = new CacheSet(associativity, blockSize); // Initialize each set
+        }
+    }
+
+    // Method to print cache contents for debugging
+    public void printCache() {
+        for (int i = 0; i < sets.length; i++) {
+            System.out.print("Set " + i + ": ");
+            for (CacheLine line : sets[i].lines) {
+                System.out.print("[Valid: " + line.valid + ", Tag: " + Integer.toHexString(line.tag) + ", Dirty: " + line.dirty + "] ");
+            }
+            System.out.println();
+        }
+    }
+}
 
 public class CacheSim {
 
@@ -6,13 +59,14 @@ public class CacheSim {
     private int capacityKB;
     private int blockSizeBytes;
     private int associativity;
+    private Cache cache; // Cache object
 
 
-    // Main method: the entry point of the program
     public static void main(String[] args) {
         CacheSim simulator = new CacheSim();
         simulator.parseParams(args);
-
+        simulator.initializeCache(); // Initialize the cache
+        simulator.startSimulation();
     }
 
     // Method to parse command-line parameters
@@ -67,6 +121,17 @@ public class CacheSim {
     // Validate associativity
     private boolean isValidAssociativity(int associativity) {
         return associativity == 1 || associativity == 2 || associativity == 4 || associativity == 8 || associativity == 16;
+    }
+
+    public void initializeCache() {
+        cache = new Cache(capacityKB, blockSizeBytes, associativity); // Create cache instance
+        System.out.println("Cache initialized with " + cache.sets.length + " sets.");
+        cache.printCache(); // Print cache contents for verification
+    }
+
+    // Placeholder for starting cache simulation (unchanged)
+    public void startSimulation() {
+        System.out.println("Simulation started with the given configuration.");
     }
 
 
