@@ -1,4 +1,3 @@
-// Cache.java - Represents the cache itself
 public class Cache {
     CacheSet[] sets; // Array of sets in the cache
 

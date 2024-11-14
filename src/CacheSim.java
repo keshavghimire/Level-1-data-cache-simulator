@@ -1,71 +1,175 @@
-// CacheSim.java - Main entry point for the cache simulator
+import java.io.*;
+
 public class CacheSim {
     private int capacityKB;
     private int blockSizeBytes;
     private int associativity;
-    private Cache cache; // Cache object
+    private Cache cache;
+    private int[] mainMemory;
 
-    // Constructor
-    public CacheSim() {
-        // You can initialize default values here if needed
+    // Parameterized Constructor
+    public CacheSim(int capacityKB, int blockSizeBytes, int associativity) {
+        this.capacityKB = capacityKB;
+        this.blockSizeBytes = blockSizeBytes;
+        this.associativity = associativity;
+
+        // Initialize main memory with 16 MB (4M words)
+        mainMemory = new int[16 * 1024 * 1024 / 4];
+        for (int i = 0; i < mainMemory.length; i++) {
+            mainMemory[i] = i; // Each word is initialized to its address
+        }
+
+        initializeCache();
     }
 
-    public static void main(String[] args) {
-        CacheSim simulator = new CacheSim();
-        simulator.parseParams(args);
-        simulator.initializeCache(); // Initialize the cache
-        simulator.startSimulation();
+    public static void main(String[] args) throws IOException {
+        if (args.length < 4) {
+            System.out.println("Usage: java CacheSim -c<capacity> -b<blocksize> -a<associativity> <trace_file>");
+            return;
+        }
+
+        // Parse command-line arguments
+        int capacityKB = Integer.parseInt(args[0].substring(2));
+        int blockSizeBytes = Integer.parseInt(args[1].substring(2));
+        int associativity = Integer.parseInt(args[2].substring(2));
+        
+        // Initialize the simulator with provided parameters
+        CacheSim simulator = new CacheSim(capacityKB, blockSizeBytes, associativity);
+
+        // Process the trace file
+        simulator.processTrace(args[3]);
+
+
+        // Print final statistics and cache contents
+        simulator.printStatistics();
     }
 
-    // Method to parse command-line parameters
-    public void parseParams(String[] args) {
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
-            if (arg.startsWith("-c")) {
-                capacityKB = Integer.parseInt(arg.substring(2));
-                if (!isValidCapacity(capacityKB)) {
-                    throw new IllegalArgumentException("Invalid capacity: " + capacityKB);
-                }
-            } else if (arg.startsWith("-b")) {
-                blockSizeBytes = Integer.parseInt(arg.substring(2));
-                if (!isValidBlockSize(blockSizeBytes)) {
-                    throw new IllegalArgumentException("Invalid block size: " + blockSizeBytes);
-                }
-            } else if (arg.startsWith("-a")) {
-                associativity = Integer.parseInt(arg.substring(2));
-                if (!isValidAssociativity(associativity)) {
-                    throw new IllegalArgumentException("Invalid associativity: " + associativity);
-                }
+    // Initialize the cache based on the given parameters
+    private void initializeCache() {
+        cache = new Cache(capacityKB, blockSizeBytes, associativity);
+        System.out.println("Cache initialized with " + cache.sets.length + " sets.");
+        cache.printCache();
+    }
+
+    // Process the trace file and apply cache operations
+    // Handle a load operation
+
+    private void handleLoad(int address) {
+        int index = calculateIndex(address);
+        int tag = calculateTag(address);
+
+        CacheSet set = cache.sets[index];
+        CacheLine line = set.findLineByTag(tag);
+
+        if (line != null && line.valid) {
+            System.out.println("Load Hit: Address " + Integer.toHexString(address));
+            updateLRU(set, line);
+        } else {
+            System.out.println("Load Miss: Address " + Integer.toHexString(address));
+            CacheLine evictedLine = set.getLRULine();
+            if (evictedLine.dirty) {
+                writeBackToMemory(evictedLine);
             }
+            loadFromMemory(address, evictedLine, tag);
+            updateLRU(set, evictedLine);
         }
     }
 
-    // Method to validate cache capacity
-    private boolean isValidCapacity(int capacity) {
-        return capacity == 4 || capacity == 8 || capacity == 16 || capacity == 32 || capacity == 64;
+    // Handle a store operation
+    private void handleStore(int address, int data) {
+        int index = calculateIndex(address);
+        int tag = calculateTag(address);
+
+        CacheSet set = cache.sets[index];
+        CacheLine line = set.findLineByTag(tag);
+
+        if (line != null && line.valid) {
+            System.out.println("Store Hit: Address " + Integer.toHexString(address));
+            line.data[address % blockSizeBytes / 4] = data;
+            line.dirty = true;
+            updateLRU(set, line);
+        } else {
+            System.out.println("Store Miss: Address " + Integer.toHexString(address));
+            CacheLine evictedLine = set.getLRULine();
+            if (evictedLine.dirty) {
+                writeBackToMemory(evictedLine);
+            }
+            loadFromMemory(address, evictedLine, tag);
+            evictedLine.data[address % blockSizeBytes / 4] = data;
+            evictedLine.dirty = true;
+            updateLRU(set, evictedLine);
+        }
     }
 
-    // Method to validate block size
-    private boolean isValidBlockSize(int blockSize) {
-        return blockSize == 4 || blockSize == 8 || blockSize == 16 || blockSize == 32 ||
-                blockSize == 64 || blockSize == 128 || blockSize == 256 || blockSize == 512;
+    // Write back the contents of a dirty cache line to main memory
+    private void writeBackToMemory(CacheLine line) {
+        int baseAddress = line.tag * cache.sets.length * blockSizeBytes;
+        for (int i = 0; i < line.data.length; i++) {
+            mainMemory[(baseAddress + i * 4) / 4] = line.data[i];
+        }
+        line.dirty = false;
     }
 
-    // Method to validate associativity
-    private boolean isValidAssociativity(int associativity) {
-        return associativity == 1 || associativity == 2 || associativity == 4 ||
-                associativity == 8 || associativity == 16;
+    // Load a cache line from main memory
+    private void loadFromMemory(int address, CacheLine line, int tag) {
+        int baseAddress = address - (address % blockSizeBytes);
+        line.tag = tag;
+        line.valid = true;
+        for (int i = 0; i < line.data.length; i++) {
+            line.data[i] = mainMemory[(baseAddress + i * 4) / 4];
+        }
     }
 
-    // Method to initialize the cache based on parameters
-    public void initializeCache() {
-        cache = new Cache(capacityKB, blockSizeBytes, associativity); // Create cache instance
-        System.out.println("Cache initialized with " + cache.sets.length + " sets.");
-        cache.printCache(); // Print cache contents for verification
+    // Update the LRU order for a cache set
+    private void updateLRU(CacheSet set, CacheLine accessedLine) {
+        set.updateLRU(accessedLine);
     }
 
-    // Placeholder for starting cache simulation
-    public void startSimulation() {
-        System.out.println("Simulation started with the given configuration.");
+    // Calculate the cache index from the address
+    private int calculateIndex(int address) {
+        int numSets = cache.sets.length;
+        return (address / blockSizeBytes) % numSets;
     }
-}
+
+    // Calculate the cache tag from the address
+    private int calculateTag(int address) {
+        int numSets = cache.sets.length;
+        return (address / blockSizeBytes) / numSets;
+    }
+
+    // Print final statistics and cache contents
+    public void printStatistics() {
+        System.out.println("Simulation complete. Final cache and memory contents:");
+        cache.printCache();
+        // Optionally, print out main memory contents if needed
+    }
+    public void processTrace(String traceFilePath) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(traceFilePath))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] parts = line.split(" ");
+                String command = parts[0];
+                String addressString = parts[1];
+                int address = Integer.parseInt(addressString.substring(2), 16); // Convert hex address to int
+                
+                if (command.equals("LOAD")) {
+                    load(address);
+                } else if (command.equals("STORE")) {
+                    store(address);
+                }
+            }
+        } catch (IOException e) {
+            System.out.println("Error reading trace file: " + e.getMessage());
+        }
+    }
+    
+
+    public void load(int address) {
+        System.out.println("Loading address: " + Integer.toHexString(address));
+        // Load logic here
+    }
+
+    public void store(int address) {
+        System.out.println("Storing address: " + Integer.toHexString(address));
+        // Store logic here
+    }}

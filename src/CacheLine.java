@@ -1,4 +1,3 @@
-// CacheLine.java - Represents a single cache line
 public class CacheLine {
     int tag;             // Tag for the cache line
     boolean valid;       // Valid bit (true if the line is valid)
