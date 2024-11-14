@@ -1,25 +1,30 @@
+import java.io.IOException;
+
 public class Main {
     public static void main(String[] args) {
-        int capacityKB = 0;
-        int blockSizeBytes = 0;
-        int associativity = 0;
-        String traceFilePath = null;
+        int capacityKB = 8;       // Default values as per the baseline
+        int blockSizeBytes = 16;
+        int associativity = 4;
+        String traceFilePath = "trace_file.txt";  // Using the uploaded trace file
 
-        for (int i = 0; i < args.length; i++) {
-            String arg = args[i];
-            if (arg.startsWith("-c")) {
-                capacityKB = Integer.parseInt(arg.substring(2));
-            } else if (arg.startsWith("-b")) {
-                blockSizeBytes = Integer.parseInt(arg.substring(2));
-            } else if (arg.startsWith("-a")) {
-                associativity = Integer.parseInt(arg.substring(2));
-            } else {
-                // If it's not -c, -b, or -a, treat it as the trace file path
-                traceFilePath = arg;
+        // Parse optional command-line arguments if provided
+        if (args.length >= 3) {
+            try {
+                capacityKB = Integer.parseInt(args[0].substring(2));
+                blockSizeBytes = Integer.parseInt(args[1].substring(2));
+                associativity = Integer.parseInt(args[2].substring(2));
+            } catch (NumberFormatException e) {
+                System.out.println("Error parsing arguments. Ensure format: -c<size> -b<size> -a<associativity>");
+                return;
+            }
+            if (args.length == 4) {
+                traceFilePath = args[3];
             }
         }
 
+        // Initialize and run the simulator
         CacheSim simulator = new CacheSim(capacityKB, blockSizeBytes, associativity);
-        simulator.processTrace(traceFilePath); // Use the trace file path as a string here
+        simulator.processTrace(traceFilePath);
+        simulator.printStatistics();  // Print statistics and cache contents at end of simulation
     }
 }

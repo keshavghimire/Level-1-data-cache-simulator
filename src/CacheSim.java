@@ -7,7 +7,11 @@ public class CacheSim {
     private Cache cache;
     private int[] mainMemory;
 
-    // Parameterized Constructor
+    private int totalMisses = 0;
+    private int readMisses = 0;
+    private int writeMisses = 0;
+    private int dirtyBlockEvictions = 0;
+
     public CacheSim(int capacityKB, int blockSizeBytes, int associativity) {
         this.capacityKB = capacityKB;
         this.blockSizeBytes = blockSizeBytes;
@@ -22,42 +26,14 @@ public class CacheSim {
         initializeCache();
     }
 
-    public static void main(String[] args) throws IOException {
-        if (args.length < 4) {
-            System.out.println("Usage: java CacheSim -c<capacity> -b<blocksize> -a<associativity> <trace_file>");
-            return;
-        }
-
-        // Parse command-line arguments
-        int capacityKB = Integer.parseInt(args[0].substring(2));
-        int blockSizeBytes = Integer.parseInt(args[1].substring(2));
-        int associativity = Integer.parseInt(args[2].substring(2));
-        
-        // Initialize the simulator with provided parameters
-        CacheSim simulator = new CacheSim(capacityKB, blockSizeBytes, associativity);
-
-        // Process the trace file
-        simulator.processTrace(args[3]);
-
-
-        // Print final statistics and cache contents
-        simulator.printStatistics();
-    }
-
-    // Initialize the cache based on the given parameters
     private void initializeCache() {
         cache = new Cache(capacityKB, blockSizeBytes, associativity);
         System.out.println("Cache initialized with " + cache.sets.length + " sets.");
-        cache.printCache();
     }
-
-    // Process the trace file and apply cache operations
-    // Handle a load operation
 
     private void handleLoad(int address) {
         int index = calculateIndex(address);
         int tag = calculateTag(address);
-
         CacheSet set = cache.sets[index];
         CacheLine line = set.findLineByTag(tag);
 
@@ -69,17 +45,18 @@ public class CacheSim {
             CacheLine evictedLine = set.getLRULine();
             if (evictedLine.dirty) {
                 writeBackToMemory(evictedLine);
+                dirtyBlockEvictions++;
             }
             loadFromMemory(address, evictedLine, tag);
             updateLRU(set, evictedLine);
+            totalMisses++;
+            readMisses++;
         }
     }
 
-    // Handle a store operation
     private void handleStore(int address, int data) {
         int index = calculateIndex(address);
         int tag = calculateTag(address);
-
         CacheSet set = cache.sets[index];
         CacheLine line = set.findLineByTag(tag);
 
@@ -93,15 +70,17 @@ public class CacheSim {
             CacheLine evictedLine = set.getLRULine();
             if (evictedLine.dirty) {
                 writeBackToMemory(evictedLine);
+                dirtyBlockEvictions++;
             }
             loadFromMemory(address, evictedLine, tag);
             evictedLine.data[address % blockSizeBytes / 4] = data;
             evictedLine.dirty = true;
             updateLRU(set, evictedLine);
+            totalMisses++;
+            writeMisses++;
         }
     }
 
-    // Write back the contents of a dirty cache line to main memory
     private void writeBackToMemory(CacheLine line) {
         int baseAddress = line.tag * cache.sets.length * blockSizeBytes;
         for (int i = 0; i < line.data.length; i++) {
@@ -110,7 +89,6 @@ public class CacheSim {
         line.dirty = false;
     }
 
-    // Load a cache line from main memory
     private void loadFromMemory(int address, CacheLine line, int tag) {
         int baseAddress = address - (address % blockSizeBytes);
         line.tag = tag;
@@ -120,56 +98,72 @@ public class CacheSim {
         }
     }
 
-    // Update the LRU order for a cache set
     private void updateLRU(CacheSet set, CacheLine accessedLine) {
         set.updateLRU(accessedLine);
     }
 
-    // Calculate the cache index from the address
     private int calculateIndex(int address) {
         int numSets = cache.sets.length;
         return (address / blockSizeBytes) % numSets;
     }
 
-    // Calculate the cache tag from the address
     private int calculateTag(int address) {
         int numSets = cache.sets.length;
         return (address / blockSizeBytes) / numSets;
     }
 
-    // Print final statistics and cache contents
     public void printStatistics() {
-        System.out.println("Simulation complete. Final cache and memory contents:");
+        double missRate = (double) totalMisses / (totalMisses + readMisses + writeMisses);
+        double readMissRate = (double) readMisses / (readMisses + totalMisses);
+        double writeMissRate = (double) writeMisses / (writeMisses + totalMisses);
+
+        System.out.printf("STATISTICS:\n");
+        System.out.printf("Misses: %d %d %d\n", totalMisses, readMisses, writeMisses);
+        System.out.printf("Miss Rate: %.4f %.4f %.4f\n", missRate, readMissRate, writeMissRate);
+        System.out.printf("Number of Dirty Blocks Evicted From the Cache: %d\n", dirtyBlockEvictions);
+        
         cache.printCache();
-        // Optionally, print out main memory contents if needed
+        printMemoryContents();
     }
+
+    public void printMemoryContents() {
+        int startAddress = 0x003F7F00;
+        System.out.println("MAIN MEMORY:");
+        for (int i = 0; i < 1024; i += 8) {
+            System.out.printf("%08X: ", startAddress + i * 4);
+            for (int j = 0; j < 8; j++) {
+                System.out.printf("%08X ", mainMemory[(startAddress / 4) + i + j]);
+            }
+            System.out.println();
+        }
+    }
+
     public void processTrace(String traceFilePath) {
         try (BufferedReader reader = new BufferedReader(new FileReader(traceFilePath))) {
             String line;
             while ((line = reader.readLine()) != null) {
                 String[] parts = line.split(" ");
                 String command = parts[0];
-                String addressString = parts[1];
-                int address = Integer.parseInt(addressString.substring(2), 16); // Convert hex address to int
+                int address = Integer.parseInt(parts[1].substring(2), 16); // Parse hex address
                 
                 if (command.equals("LOAD")) {
-                    load(address);
+                    handleLoad(address);
                 } else if (command.equals("STORE")) {
-                    store(address);
+                    // Ensure the STORE command has the data word (i.e., three parts in total)
+                    if (parts.length < 3) {
+                        System.out.println("Error: STORE command is missing the data word.");
+                        continue;  // Skip this line and move to the next one
+                    }
+                    int data = Integer.parseInt(parts[2].substring(2), 16); // Parse hex data for STORE
+                    handleStore(address, data);
                 }
             }
         } catch (IOException e) {
             System.out.println("Error reading trace file: " + e.getMessage());
+        } catch (NumberFormatException e) {
+            System.out.println("Error parsing number: " + e.getMessage());
         }
     }
     
-
-    public void load(int address) {
-        System.out.println("Loading address: " + Integer.toHexString(address));
-        // Load logic here
-    }
-
-    public void store(int address) {
-        System.out.println("Storing address: " + Integer.toHexString(address));
-        // Store logic here
-    }}
+    
+}

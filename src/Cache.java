@@ -1,17 +1,15 @@
 public class Cache {
-    CacheSet[] sets; // Array of sets in the cache
+    CacheSet[] sets;
 
-    // Constructor
     public Cache(int capacityKB, int blockSize, int associativity) {
-        int numSets = (capacityKB * 1024) / (blockSize * associativity); // Calculate number of sets
+        int numSets = (capacityKB * 1024) / (blockSize * associativity);
         sets = new CacheSet[numSets];
 
         for (int i = 0; i < numSets; i++) {
-            sets[i] = new CacheSet(associativity, blockSize); // Initialize each set
+            sets[i] = new CacheSet(associativity, blockSize);
         }
     }
 
-    // Method to print cache contents for debugging
     public void printCache() {
         for (int i = 0; i < sets.length; i++) {
             System.out.print("Set " + i + ": ");
