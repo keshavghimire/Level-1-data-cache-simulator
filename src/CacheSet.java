@@ -1,21 +1,14 @@
-import java.util.LinkedList;
-import java.util.Queue;
-
 public class CacheSet {
-    CacheLine[] lines;
-    Queue<CacheLine> lruQueue;
+    public CacheLine[] lines; // Array of cache lines
 
-    public CacheSet(int associativity, int blockSize) {
+    public CacheSet(int associativity, int blockWords) {
         lines = new CacheLine[associativity];
-        lruQueue = new LinkedList<>();
-
         for (int i = 0; i < associativity; i++) {
-            lines[i] = new CacheLine(blockSize);
-            lruQueue.add(lines[i]);
+            lines[i] = new CacheLine(blockWords);
         }
     }
 
-    public CacheLine findLineByTag(int tag) {
+    public CacheLine findLine(int tag) {
         for (CacheLine line : lines) {
             if (line.valid && line.tag == tag) {
                 return line;
@@ -24,17 +17,37 @@ public class CacheSet {
         return null;
     }
 
-    public CacheLine getLRULine() {
-        for (CacheLine line : lruQueue) {
+    public CacheLine replaceLine(int tag) {
+        CacheLine lruLine = lines[0];
+        for (CacheLine line : lines) {
             if (!line.valid) {
-                return line;
+                lruLine = line;
+                break;
+            } else if (line.lruCounter > lruLine.lruCounter) {
+                lruLine = line;
             }
         }
-        return lruQueue.peek();
+
+        // Handle eviction
+        if (lruLine.valid && lruLine.dirty) {
+            System.out.println("Evicting dirty line with tag: " + Integer.toHexString(lruLine.tag));
+            CacheSim.dirtyEvictions++;
+        }
+
+        // Replace the line
+        lruLine.valid = true;
+        lruLine.dirty = false;
+        lruLine.tag = tag;
+        lruLine.lruCounter = 0;
+        return lruLine;
     }
 
-    public void updateLRU(CacheLine accessedLine) {
-        lruQueue.remove(accessedLine);
-        lruQueue.add(accessedLine);
+    public void updateLRUCounters(CacheLine accessedLine) {
+        for (CacheLine line : lines) {
+            if (line.valid && line != accessedLine) {
+                line.lruCounter++;
+            }
+        }
+        accessedLine.lruCounter = 0;
     }
 }

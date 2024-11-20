@@ -1,13 +1,15 @@
 public class CacheLine {
-    int tag;
-    boolean valid;
-    boolean dirty;
-    int[] data;
+    public boolean valid;
+    public boolean dirty;
+    public int tag;
+    public int lruCounter;
+    public int[] data; // Block data (words)
 
-    public CacheLine(int blockSize) {
-        this.tag = 0;
-        this.valid = false;
-        this.dirty = false;
-        this.data = new int[blockSize / 4];
+    public CacheLine(int blockWords) {
+        valid = false;
+        dirty = false;
+        tag = 0;
+        lruCounter = 0;
+        data = new int[blockWords];
     }
 }

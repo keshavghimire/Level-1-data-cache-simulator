@@ -1,169 +1,163 @@
-import java.io.*;
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.PrintWriter;
+import java.util.Scanner;
 
 public class CacheSim {
     private int capacityKB;
     private int blockSizeBytes;
     private int associativity;
-    private Cache cache;
-    private int[] mainMemory;
+    private Cache cache; // Cache object
+    private int[] mainMemory; // Simple main memory model
 
-    private int totalMisses = 0;
+    // Statistics
+    public static int dirtyEvictions = 0;
+    private int totalAccesses = 0;
+    private int readHits = 0;
+    private int writeHits = 0;
     private int readMisses = 0;
     private int writeMisses = 0;
-    private int dirtyBlockEvictions = 0;
 
-    public CacheSim(int capacityKB, int blockSizeBytes, int associativity) {
-        this.capacityKB = capacityKB;
-        this.blockSizeBytes = blockSizeBytes;
-        this.associativity = associativity;
+    public static void main(String[] args) {
+        CacheSim simulator = new CacheSim();
+        simulator.parseParams(args);
+        simulator.initializeCache();
+        simulator.loadTrace("trace.txt");
 
-        // Initialize main memory with 16 MB (4M words)
-        mainMemory = new int[16 * 1024 * 1024 / 4];
-        for (int i = 0; i < mainMemory.length; i++) {
-            mainMemory[i] = i; // Each word is initialized to its address
+        try (PrintWriter writer = new PrintWriter("output.txt")) {
+            simulator.printStatistics(writer);
+            simulator.printCacheContents(writer);
+            simulator.printMainMemory(writer);
+        } catch (FileNotFoundException e) {
+            System.err.println("Error writing to output file: " + e.getMessage());
         }
-
-        initializeCache();
     }
 
-    private void initializeCache() {
+    public void parseParams(String[] args) {
+        for (String arg : args) {
+            if (arg.startsWith("-c")) {
+                capacityKB = Integer.parseInt(arg.substring(2));
+            } else if (arg.startsWith("-b")) {
+                blockSizeBytes = Integer.parseInt(arg.substring(2));
+            } else if (arg.startsWith("-a")) {
+                associativity = Integer.parseInt(arg.substring(2));
+            }
+        }
+    }
+
+    public void initializeCache() {
         cache = new Cache(capacityKB, blockSizeBytes, associativity);
-        System.out.println("Cache initialized with " + cache.sets.length + " sets.");
-    }
-
-    private void handleLoad(int address) {
-        int index = calculateIndex(address);
-        int tag = calculateTag(address);
-        CacheSet set = cache.sets[index];
-        CacheLine line = set.findLineByTag(tag);
-
-        if (line != null && line.valid) {
-            System.out.println("Load Hit: Address " + Integer.toHexString(address));
-            updateLRU(set, line);
-        } else {
-            System.out.println("Load Miss: Address " + Integer.toHexString(address));
-            CacheLine evictedLine = set.getLRULine();
-            if (evictedLine.dirty) {
-                writeBackToMemory(evictedLine);
-                dirtyBlockEvictions++;
-            }
-            loadFromMemory(address, evictedLine, tag);
-            updateLRU(set, evictedLine);
-            totalMisses++;
-            readMisses++;
+        mainMemory = new int[16 * 1024 * 1024 / 4]; // Initialize 16MB of main memory
+        for (int i = 0; i < mainMemory.length; i++) {
+            mainMemory[i] = i; // Memory content initialized to addresses
         }
     }
 
-    private void handleStore(int address, int data) {
-        int index = calculateIndex(address);
-        int tag = calculateTag(address);
-        CacheSet set = cache.sets[index];
-        CacheLine line = set.findLineByTag(tag);
-
-        if (line != null && line.valid) {
-            System.out.println("Store Hit: Address " + Integer.toHexString(address));
-            line.data[address % blockSizeBytes / 4] = data;
-            line.dirty = true;
-            updateLRU(set, line);
-        } else {
-            System.out.println("Store Miss: Address " + Integer.toHexString(address));
-            CacheLine evictedLine = set.getLRULine();
-            if (evictedLine.dirty) {
-                writeBackToMemory(evictedLine);
-                dirtyBlockEvictions++;
-            }
-            loadFromMemory(address, evictedLine, tag);
-            evictedLine.data[address % blockSizeBytes / 4] = data;
-            evictedLine.dirty = true;
-            updateLRU(set, evictedLine);
-            totalMisses++;
-            writeMisses++;
-        }
-    }
-
-    private void writeBackToMemory(CacheLine line) {
-        int baseAddress = line.tag * cache.sets.length * blockSizeBytes;
-        for (int i = 0; i < line.data.length; i++) {
-            mainMemory[(baseAddress + i * 4) / 4] = line.data[i];
-        }
-        line.dirty = false;
-    }
-
-    private void loadFromMemory(int address, CacheLine line, int tag) {
-        int baseAddress = address - (address % blockSizeBytes);
-        line.tag = tag;
-        line.valid = true;
-        for (int i = 0; i < line.data.length; i++) {
-            line.data[i] = mainMemory[(baseAddress + i * 4) / 4];
-        }
-    }
-
-    private void updateLRU(CacheSet set, CacheLine accessedLine) {
-        set.updateLRU(accessedLine);
-    }
-
-    private int calculateIndex(int address) {
-        int numSets = cache.sets.length;
-        return (address / blockSizeBytes) % numSets;
-    }
-
-    private int calculateTag(int address) {
-        int numSets = cache.sets.length;
-        return (address / blockSizeBytes) / numSets;
-    }
-
-    public void printStatistics() {
-        double missRate = (double) totalMisses / (totalMisses + readMisses + writeMisses);
-        double readMissRate = (double) readMisses / (readMisses + totalMisses);
-        double writeMissRate = (double) writeMisses / (writeMisses + totalMisses);
-
-        System.out.printf("STATISTICS:\n");
-        System.out.printf("Misses: %d %d %d\n", totalMisses, readMisses, writeMisses);
-        System.out.printf("Miss Rate: %.4f %.4f %.4f\n", missRate, readMissRate, writeMissRate);
-        System.out.printf("Number of Dirty Blocks Evicted From the Cache: %d\n", dirtyBlockEvictions);
-        
-        cache.printCache();
-        printMemoryContents();
-    }
-
-    public void printMemoryContents() {
-        int startAddress = 0x003F7F00;
-        System.out.println("MAIN MEMORY:");
-        for (int i = 0; i < 1024; i += 8) {
-            System.out.printf("%08X: ", startAddress + i * 4);
-            for (int j = 0; j < 8; j++) {
-                System.out.printf("%08X ", mainMemory[(startAddress / 4) + i + j]);
-            }
-            System.out.println();
-        }
-    }
-
-    public void processTrace(String traceFilePath) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(traceFilePath))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] parts = line.split(" ");
-                String command = parts[0];
-                int address = Integer.parseInt(parts[1].substring(2), 16); // Parse hex address
-                
-                if (command.equals("LOAD")) {
-                    handleLoad(address);
-                } else if (command.equals("STORE")) {
-                    // Ensure the STORE command has the data word (i.e., three parts in total)
-                    if (parts.length < 3) {
-                        System.out.println("Error: STORE command is missing the data word.");
-                        continue;  // Skip this line and move to the next one
-                    }
-                    int data = Integer.parseInt(parts[2].substring(2), 16); // Parse hex data for STORE
-                    handleStore(address, data);
+    public void loadTrace(String filename) {
+        try (Scanner scanner = new Scanner(new File(filename))) {
+            while (scanner.hasNextLine()) {
+                String[] parts = scanner.nextLine().split(" ");
+                if (parts[0].equals("0")) { // Read operation
+                    int address = Integer.parseInt(parts[1], 16);
+                    readFromCache(address);
+                } else if (parts[0].equals("1")) { // Write operation
+                    int address = Integer.parseInt(parts[1], 16);
+                    int data = Integer.parseInt(parts[2], 16);
+                    writeToCache(address, data);
                 }
             }
-        } catch (IOException e) {
-            System.out.println("Error reading trace file: " + e.getMessage());
-        } catch (NumberFormatException e) {
-            System.out.println("Error parsing number: " + e.getMessage());
+        } catch (FileNotFoundException e) {
+            System.err.println("Trace file not found: " + filename);
         }
     }
-    
-    
+
+    private void readFromCache(int address) {
+        totalAccesses++;
+        int tag = address / blockSizeBytes / cache.sets.length;
+        int setIndex = (address / blockSizeBytes) % cache.sets.length;
+        CacheSet set = cache.sets[setIndex];
+
+        CacheLine line = set.findLine(tag);
+        if (line != null) {
+            readHits++;
+            set.updateLRUCounters(line);
+        } else {
+            readMisses++;
+            line = set.replaceLine(tag);
+            loadFromMemory(address, line);
+        }
+    }
+
+    private void writeToCache(int address, int data) {
+        totalAccesses++;
+        int tag = address / blockSizeBytes / cache.sets.length;
+        int setIndex = (address / blockSizeBytes) % cache.sets.length;
+        CacheSet set = cache.sets[setIndex];
+
+        CacheLine line = set.findLine(tag);
+        if (line != null) {
+            writeHits++;
+            set.updateLRUCounters(line);
+        } else {
+            writeMisses++;
+            line = set.replaceLine(tag);
+            loadFromMemory(address, line);
+        }
+        line.dirty = true;
+        int wordIndex = (address % blockSizeBytes) / 4;
+        line.data[wordIndex] = data;
+    }
+
+    private void loadFromMemory(int address, CacheLine line) {
+        int baseAddress = (address / blockSizeBytes) * blockSizeBytes;
+        for (int i = 0; i < line.data.length; i++) {
+            line.data[i] = mainMemory[(baseAddress / 4) + i];
+        }
+    }
+
+    public void printStatistics(PrintWriter writer) {
+        writer.println("STATISTICS:");
+        writer.println("Misses:");
+        writer.printf("Total: %d DataReads: %d DataWrites: %d%n", (readMisses + writeMisses), readMisses, writeMisses);
+        writer.println("Miss rate:");
+        writer.printf("Total: %.6f DataReads: %.6f DataWrites: %.6f%n",
+                (double) (readMisses + writeMisses) / totalAccesses,
+                (double) readMisses / (readHits + readMisses),
+                (double) writeMisses / (writeHits + writeMisses));
+        writer.printf("Number of Dirty Blocks Evicted From the Cache: %d%n", dirtyEvictions);
+        writer.println();
+    }
+
+    public void printCacheContents(PrintWriter writer) {
+        writer.println("CACHE CONTENTS");
+        writer.println("Set   V    Tag       Dirty    Word0      Word1      Word2      Word3      Word4      Word5      Word6      Word7");
+        for (int i = 0; i < cache.sets.length; i++) {
+            CacheSet set = cache.sets[i];
+            for (CacheLine line : set.lines) {
+                writer.printf("%-5d %-4d %-9s %-8d",
+                        i,
+                        line.valid ? 1 : 0,
+                        line.valid ? String.format("%08x", line.tag) : "00000000",
+                        line.dirty ? 1 : 0);
+                for (int word : line.data) {
+                    writer.printf(" %-10s", String.format("%08x", word));
+                }
+                writer.println();
+            }
+        }
+        writer.println();
+    }
+
+    public void printMainMemory(PrintWriter writer) {
+        writer.println("MAIN MEMORY:");
+        writer.println("Address    Words");
+        for (int i = 0; i < mainMemory.length; i += 8) {
+            writer.printf("%08x", i * 4);
+            for (int j = 0; j < 8 && (i + j) < mainMemory.length; j++) {
+                writer.printf("   %-10s", String.format("%08x", mainMemory[i + j]));
+            }
+            writer.println();
+        }
+        writer.println();
+    }
 }
