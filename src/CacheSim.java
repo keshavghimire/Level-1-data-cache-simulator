@@ -1,6 +1,8 @@
 import java.io.File;
 import java.io.FileNotFoundException;
-import java.io.PrintWriter;
+import java.io.FileWriter;
+import java.io.BufferedWriter;
+import java.io.IOException;
 import java.util.Scanner;
 
 public class CacheSim {
@@ -9,31 +11,33 @@ public class CacheSim {
     private int associativity;
     private Cache cache; // Cache object
     private int[] mainMemory; // Simple main memory model
+    public static int dirtyEvictions = 0; // Number of dirty evictions
+    public static int readHits = 0; // Read hits
+    public static int readMisses = 0; // Read misses
+    public static int writeHits = 0; // Write hits
+    public static int writeMisses = 0; // Write misses
+    public static int totalAccesses = 0; // Total accesses
 
-    // Statistics
-    public static int dirtyEvictions = 0;
-    private int totalAccesses = 0;
-    private int readHits = 0;
-    private int writeHits = 0;
-    private int readMisses = 0;
-    private int writeMisses = 0;
-
-    public static void main(String[] args) {
-        CacheSim simulator = new CacheSim();
-        simulator.parseParams(args);
-        simulator.initializeCache();
-        simulator.loadTrace("trace.txt");
-
-        try (PrintWriter writer = new PrintWriter("output.txt")) {
-            simulator.printStatistics(writer);
-            simulator.printCacheContents(writer);
-            simulator.printMainMemory(writer);
-        } catch (FileNotFoundException e) {
-            System.err.println("Error writing to output file: " + e.getMessage());
+    // Constructor to initialize the CacheSim with capacity, block size, and associativity
+    public CacheSim(int capacityKB, int blockSizeBytes, int associativity) {
+        this.capacityKB = capacityKB;
+        this.blockSizeBytes = blockSizeBytes;
+        this.associativity = associativity;
+        this.cache = new Cache(capacityKB, blockSizeBytes, associativity);
+        this.mainMemory = new int[16 * 1024 * 1024 / 4]; // Initialize 16MB of main memory
+        // Initialize main memory with some values (just the addresses for simplicity)
+        for (int i = 0; i < mainMemory.length; i++) {
+            mainMemory[i] = i;
         }
     }
 
-    public void parseParams(String[] args) {
+    public static void main(String[] args) {
+        // Parsing input parameters from the command line or GUI
+        int capacityKB = 8; // default 8KB
+        int blockSizeBytes = 16; // default 16 bytes
+        int associativity = 4; // default 4-way set associative
+
+        // Parsing arguments
         for (String arg : args) {
             if (arg.startsWith("-c")) {
                 capacityKB = Integer.parseInt(arg.substring(2));
@@ -43,25 +47,51 @@ public class CacheSim {
                 associativity = Integer.parseInt(arg.substring(2));
             }
         }
-    }
 
-    public void initializeCache() {
-        cache = new Cache(capacityKB, blockSizeBytes, associativity);
-        mainMemory = new int[16 * 1024 * 1024 / 4]; // Initialize 16MB of main memory
-        for (int i = 0; i < mainMemory.length; i++) {
-            mainMemory[i] = i; // Memory content initialized to addresses
+        // Initialize the CacheSim with user-specified values
+        CacheSim simulator = new CacheSim(capacityKB, blockSizeBytes, associativity);
+
+        // Load and process a trace file
+        simulator.loadTrace("/Users/keshavghimire/Master/Comp Arc/Level-1-data-cache-simulator/src/trace.txt");
+
+        // Print the simulation results to output.txt
+        try {
+            simulator.writeSimulationResultsToFile("output.txt");
+        } catch (IOException e) {
+            System.err.println("Error writing to output file: " + e.getMessage());
         }
     }
 
+    // Setters and getters for the cache properties
+    public void setCapacityKB(int capacityKB) {
+        this.capacityKB = capacityKB;
+    }
+
+    public void setBlockSizeBytes(int blockSizeBytes) {
+        this.blockSizeBytes = blockSizeBytes;
+    }
+
+    public void setAssociativity(int associativity) {
+        this.associativity = associativity;
+    }
+
+    public Cache getCache() {
+        return this.cache;
+    }
+
+    public void initializeCache() {
+        this.cache = new Cache(capacityKB, blockSizeBytes, associativity);
+    }
+
+    // Parse trace file for cache operations
     public void loadTrace(String filename) {
         try (Scanner scanner = new Scanner(new File(filename))) {
             while (scanner.hasNextLine()) {
                 String[] parts = scanner.nextLine().split(" ");
+                int address = Integer.parseInt(parts[1], 16);
                 if (parts[0].equals("0")) { // Read operation
-                    int address = Integer.parseInt(parts[1], 16);
                     readFromCache(address);
                 } else if (parts[0].equals("1")) { // Write operation
-                    int address = Integer.parseInt(parts[1], 16);
                     int data = Integer.parseInt(parts[2], 16);
                     writeToCache(address, data);
                 }
@@ -71,6 +101,7 @@ public class CacheSim {
         }
     }
 
+    // Read data from cache
     private void readFromCache(int address) {
         totalAccesses++;
         int tag = address / blockSizeBytes / cache.sets.length;
@@ -80,14 +111,16 @@ public class CacheSim {
         CacheLine line = set.findLine(tag);
         if (line != null) {
             readHits++;
-            set.updateLRUCounters(line);
+            System.out.println("Read hit at address: " + Integer.toHexString(address));
         } else {
             readMisses++;
+            System.out.println("Read miss at address: " + Integer.toHexString(address));
             line = set.replaceLine(tag);
             loadFromMemory(address, line);
         }
     }
 
+    // Write data to cache
     private void writeToCache(int address, int data) {
         totalAccesses++;
         int tag = address / blockSizeBytes / cache.sets.length;
@@ -97,17 +130,19 @@ public class CacheSim {
         CacheLine line = set.findLine(tag);
         if (line != null) {
             writeHits++;
-            set.updateLRUCounters(line);
+            System.out.println("Write hit at address: " + Integer.toHexString(address));
         } else {
             writeMisses++;
+            System.out.println("Write miss at address: " + Integer.toHexString(address));
             line = set.replaceLine(tag);
             loadFromMemory(address, line);
         }
         line.dirty = true;
-        int wordIndex = (address % blockSizeBytes) / 4;
+        int wordIndex = (address % blockSizeBytes) / 4; // Assume 4 bytes per word
         line.data[wordIndex] = data;
     }
 
+    // Load data into cache from memory
     private void loadFromMemory(int address, CacheLine line) {
         int baseAddress = (address / blockSizeBytes) * blockSizeBytes;
         for (int i = 0; i < line.data.length; i++) {
@@ -115,49 +150,63 @@ public class CacheSim {
         }
     }
 
-    public void printStatistics(PrintWriter writer) {
-        writer.println("STATISTICS:");
-        writer.println("Misses:");
-        writer.printf("Total: %d DataReads: %d DataWrites: %d%n", (readMisses + writeMisses), readMisses, writeMisses);
-        writer.println("Miss rate:");
-        writer.printf("Total: %.6f DataReads: %.6f DataWrites: %.6f%n",
-                (double) (readMisses + writeMisses) / totalAccesses,
-                (double) readMisses / (readHits + readMisses),
-                (double) writeMisses / (writeHits + writeMisses));
-        writer.printf("Number of Dirty Blocks Evicted From the Cache: %d%n", dirtyEvictions);
-        writer.println();
-    }
+    // Get statistics from the cache simulation
+    public String getSimulationResults() {
+        StringBuilder results = new StringBuilder();
+        double totalMissRate = (double) (readMisses + writeMisses) / totalAccesses;
+        double readMissRate = (double) readMisses / (readHits + readMisses);
+        double writeMissRate = (double) writeMisses / (writeHits + writeMisses);
 
-    public void printCacheContents(PrintWriter writer) {
-        writer.println("CACHE CONTENTS");
-        writer.println("Set   V    Tag       Dirty    Word0      Word1      Word2      Word3      Word4      Word5      Word6      Word7");
+        results.append("STATISTICS: \n");
+        results.append("Misses:\n");
+        results.append("Total: ").append(readMisses + writeMisses)
+                .append(" DataReads: ").append(readMisses)
+                .append(" DataWrites: ").append(writeMisses).append("\n");
+
+        results.append("Miss rate:\n");
+        results.append("Total: ").append(totalMissRate)
+                .append(" DataReads: ").append(readMissRate)
+                .append(" DataWrites: ").append(writeMissRate).append("\n");
+
+        results.append("Number of Dirty Blocks Evicted From the Cache: ").append(dirtyEvictions).append("\n");
+
+        results.append("\nCACHE CONTENTS:\n");
+        results.append("Set   V    Tag    Dirty    Word0      Word1      Word2      Word3      Word4      Word5      Word6      Word7   \n");
+
+        // Loop through the sets to print cache contents
         for (int i = 0; i < cache.sets.length; i++) {
             CacheSet set = cache.sets[i];
             for (CacheLine line : set.lines) {
-                writer.printf("%-5d %-4d %-9s %-8d",
-                        i,
-                        line.valid ? 1 : 0,
-                        line.valid ? String.format("%08x", line.tag) : "00000000",
-                        line.dirty ? 1 : 0);
+                results.append(i).append("     ").append(line.valid ? "1" : "0").append("   ")
+                        .append(String.format("%08x", line.tag)).append("    ")
+                        .append(line.dirty ? "1" : "0");
                 for (int word : line.data) {
-                    writer.printf(" %-10s", String.format("%08x", word));
+                    results.append("   ").append(String.format("%08x", word));
                 }
-                writer.println();
+                results.append("\n");
             }
         }
-        writer.println();
+
+        results.append("\nMAIN MEMORY: \n");
+        for (int i = 0; i < mainMemory.length; i += 8) {
+            results.append(String.format("%08x", i * 4)).append("   ");
+            for (int j = 0; j < 8; j++) {
+                results.append(String.format("%08x", mainMemory[i + j])).append("   ");
+            }
+            results.append("\n");
+        }
+
+        return results.toString();
     }
 
-    public void printMainMemory(PrintWriter writer) {
-        writer.println("MAIN MEMORY:");
-        writer.println("Address    Words");
-        for (int i = 0; i < mainMemory.length; i += 8) {
-            writer.printf("%08x", i * 4);
-            for (int j = 0; j < 8 && (i + j) < mainMemory.length; j++) {
-                writer.printf("   %-10s", String.format("%08x", mainMemory[i + j]));
-            }
-            writer.println();
+    // Method to write simulation results to an output file
+    public void writeSimulationResultsToFile(String filename) throws IOException {
+        String results = getSimulationResults();
+
+        // Create or overwrite the file with the given name
+        try (BufferedWriter writer = new BufferedWriter(new FileWriter(filename))) {
+            writer.write(results);
+            System.out.println("Simulation results have been written to " + filename);
         }
-        writer.println();
     }
 }
