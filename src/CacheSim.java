@@ -56,7 +56,8 @@ public class CacheSim {
 
         // Print the simulation results to output.txt
         try {
-            simulator.writeSimulationResultsToFile("output.txt");
+            String outputFilePath = "src/test.output"; // Specify path to src folder
+            simulator.writeSimulationResultsToFile(outputFilePath);
         } catch (IOException e) {
             System.err.println("Error writing to output file: " + e.getMessage());
         }
@@ -153,45 +154,44 @@ public class CacheSim {
     // Get statistics from the cache simulation
     public String getSimulationResults() {
         StringBuilder results = new StringBuilder();
+
+        // STATISTICS Section
         double totalMissRate = (double) (readMisses + writeMisses) / totalAccesses;
         double readMissRate = (double) readMisses / (readHits + readMisses);
         double writeMissRate = (double) writeMisses / (writeHits + writeMisses);
-
-        results.append("STATISTICS: \n");
+        results.append("STATISTICS:\n");
         results.append("Misses:\n");
-        results.append("Total: ").append(readMisses + writeMisses)
-                .append(" DataReads: ").append(readMisses)
-                .append(" DataWrites: ").append(writeMisses).append("\n");
-
+        results.append(String.format("Total: %d DataReads: %d DataWrites: %d\n",
+                readMisses + writeMisses, readMisses, writeMisses));
         results.append("Miss rate:\n");
-        results.append("Total: ").append(totalMissRate)
-                .append(" DataReads: ").append(readMissRate)
-                .append(" DataWrites: ").append(writeMissRate).append("\n");
+        results.append(String.format("Total: %.4f DataReads: %.4f DataWrites: %.4f\n",
+                totalMissRate, readMissRate, writeMissRate));
+        results.append(String.format("Number of Dirty Blocks Evicted From the Cache: %d\n", dirtyEvictions));
 
-        results.append("Number of Dirty Blocks Evicted From the Cache: ").append(dirtyEvictions).append("\n");
-
+        // CACHE CONTENTS Section
         results.append("\nCACHE CONTENTS:\n");
-        results.append("Set   V    Tag    Dirty    Word0      Word1      Word2      Word3      Word4      Word5      Word6      Word7   \n");
-
-        // Loop through the sets to print cache contents
+        results.append("Set   V   Tag       Dirty   Word0      Word1      Word2      Word3      Word4      Word5      Word6      Word7   \n");
         for (int i = 0; i < cache.sets.length; i++) {
             CacheSet set = cache.sets[i];
             for (CacheLine line : set.lines) {
-                results.append(i).append("     ").append(line.valid ? "1" : "0").append("   ")
-                        .append(String.format("%08x", line.tag)).append("    ")
-                        .append(line.dirty ? "1" : "0");
+                if (!line.valid) continue;  // Skip invalid lines
+                results.append(String.format("%-5d %-3d %-10s %-7d",
+                        i, line.valid ? 1 : 0, String.format("%08x", line.tag), line.dirty ? 1 : 0));
                 for (int word : line.data) {
-                    results.append("   ").append(String.format("%08x", word));
+                    results.append(String.format(" %-10s", String.format("%08x", word)));
                 }
                 results.append("\n");
             }
         }
 
-        results.append("\nMAIN MEMORY: \n");
-        for (int i = 0; i < mainMemory.length; i += 8) {
-            results.append(String.format("%08x", i * 4)).append("   ");
+        // MAIN MEMORY Section
+        results.append("\nMAIN MEMORY:\n");
+        results.append("Address    Words\n");
+        int startAddress = 0x003f7f00 / 4;
+        for (int i = startAddress; i < startAddress + 1024; i += 8) {
+            results.append(String.format("%08x   ", i * 4));
             for (int j = 0; j < 8; j++) {
-                results.append(String.format("%08x", mainMemory[i + j])).append("   ");
+                results.append(String.format("%08x   ", mainMemory[i + j]));
             }
             results.append("\n");
         }
